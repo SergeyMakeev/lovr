@@ -2273,7 +2273,7 @@ void* lovrBufferGetData(Buffer* buffer, uint32_t offset, uint32_t extent) {
   BufferView view = getBuffer(GPU_BUFFER_DOWNLOAD, extent, 4);
   if (!view.buffer) return mtx_unlock(&state.lock), NULL;
 
-  gpu_copy_buffers(state.stream, buffer->gpu, view.buffer, buffer->base + offset, view.offset, extent);
+  gpu_copy_buffers(state.stream, buffer->gpu, view.buffer, offset, view.offset, extent);
   mtx_unlock(&state.lock);
 
   if (!lovrGraphicsSubmit(NULL, 0) || !lovrGraphicsWait()) {
@@ -2295,7 +2295,7 @@ void* lovrBufferSetData(Buffer* buffer, uint32_t offset, uint32_t extent) {
   BufferView view = getBuffer(GPU_BUFFER_UPLOAD, extent, 4);
   if (!view.buffer) return mtx_unlock(&state.lock), NULL;
 
-  gpu_copy_buffers(state.stream, view.buffer, buffer->gpu, view.offset, buffer->base + offset, extent);
+  gpu_copy_buffers(state.stream, view.buffer, buffer->gpu, view.offset, offset, extent);
   mtx_unlock(&state.lock);
   return view.pointer;
 }
@@ -2312,7 +2312,7 @@ bool lovrBufferCopy(Buffer* src, Buffer* dst, uint32_t srcOffset, uint32_t dstOf
   barriers[1] = syncStream(dst->sync, GPU_PHASE_COPY, GPU_CACHE_TRANSFER_WRITE);
   gpu_sync(state.stream, barriers, 2);
 
-  gpu_copy_buffers(state.stream, src->gpu, dst->gpu, src->base + srcOffset, dst->base + dstOffset, extent);
+  gpu_copy_buffers(state.stream, src->gpu, dst->gpu, srcOffset, dstOffset, extent);
   mtx_unlock(&state.lock);
   return true;
 }
@@ -2329,7 +2329,7 @@ bool lovrBufferClear(Buffer* buffer, uint32_t offset, uint32_t extent, uint32_t 
   gpu_barrier barrier = syncStream(buffer->sync, GPU_PHASE_CLEAR, GPU_CACHE_TRANSFER_WRITE);
   gpu_sync(state.stream, &barrier, 1);
 
-  gpu_clear_buffer(state.stream, buffer->gpu, buffer->base + offset, extent, value);
+  gpu_clear_buffer(state.stream, buffer->gpu, offset, extent, value);
   mtx_unlock(&state.lock);
   return true;
 }
@@ -6173,7 +6173,7 @@ Readback* lovrReadbackCreateBuffer(Buffer* buffer, uint32_t offset, uint32_t ext
   lovrRetain(buffer);
   gpu_barrier barrier = syncStream(buffer->sync, GPU_PHASE_COPY, GPU_CACHE_TRANSFER_READ);
   gpu_sync(state.stream, &barrier, 1);
-  gpu_copy_buffers(state.stream, buffer->gpu, readback->view.buffer, buffer->base + offset, readback->view.offset, extent);
+  gpu_copy_buffers(state.stream, buffer->gpu, readback->view.buffer, offset, readback->view.offset, extent);
   mtx_unlock(&state.lock);
   return readback;
 }
@@ -7324,7 +7324,7 @@ bool lovrPassSendBuffer(Pass* pass, const char* name, size_t length, Buffer* buf
 
   trackBuffer(pass, buffer, resource->phase, resource->cache);
   pass->bindings[slot].buffer.object = buffer->gpu;
-  pass->bindings[slot].buffer.offset = buffer->base + offset;
+  pass->bindings[slot].buffer.offset = offset;
   pass->bindings[slot].buffer.extent = extent;
   pass->flags |= DIRTY_BINDINGS;
   return true;
@@ -7587,7 +7587,7 @@ static bool lovrPassResolveVertices(Pass* pass, DrawInfo* info, Draw* draw) {
     lovrCheck(stride <= state.limits.vertexBufferStride, "Vertex buffer stride exceeds vertexBufferStride limit");
     trackBuffer(pass, buffer, GPU_PHASE_INPUT_VERTEX, GPU_CACHE_VERTEX);
     draw->vertexBuffer = buffer->gpu;
-    draw->vertexBufferOffset = buffer->base;
+    draw->vertexBufferOffset = 0;
   } else {
     draw->vertexBuffer = state.defaultBuffer->gpu;
     draw->vertexBufferOffset = 0;
@@ -7603,7 +7603,6 @@ static bool lovrPassResolveVertices(Pass* pass, DrawInfo* info, Draw* draw) {
     trackBuffer(pass, info->index.buffer, GPU_PHASE_INPUT_INDEX, GPU_CACHE_INDEX);
     draw->indexBuffer = info->index.buffer->gpu;
     draw->flags |= info->index.buffer->info.format->stride == 4 ? DRAW_INDEX32 : 0;
-    draw->start += info->index.buffer->base / info->index.buffer->info.format->stride;
   } else {
     draw->indexBuffer = NULL;
   }
@@ -8903,7 +8902,7 @@ bool lovrPassMeshIndirect(Pass* pass, Buffer* vertices, Buffer* indices, Buffer*
   trackMaterial(pass, draw->material);
 
   draw->indirect.buffer = draws->gpu;
-  draw->indirect.offset = draws->base + offset;
+  draw->indirect.offset = offset;
   draw->indirect.count = count;
   draw->indirect.stride = stride;
 
@@ -8994,7 +8993,7 @@ bool lovrPassCompute(Pass* pass, uint32_t x, uint32_t y, uint32_t z, Buffer* ind
   if (indirect) {
     compute->flags |= COMPUTE_INDIRECT;
     compute->indirect.buffer = indirect->gpu;
-    compute->indirect.offset = indirect->base + offset;
+    compute->indirect.offset = offset;
     trackBuffer(pass, indirect, GPU_PHASE_INDIRECT, GPU_CACHE_INDIRECT);
   } else {
     compute->x = x;
