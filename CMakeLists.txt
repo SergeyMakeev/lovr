@@ -46,7 +46,7 @@ if(EMSCRIPTEN)
     "-Os "
     "-sUSE_WEBGPU=1 "
     "-sFORCE_FILESYSTEM=1 "
-    "-sINITIAL_HEAP=1677721600 "
+    "-sINITIAL_MEMORY=1677721600 "
     "-sEXPORTED_FUNCTIONS=_main "
     "-sEXPORTED_RUNTIME_METHODS=getValue,setValue "
     "--shell-file \"${PROJECT_SOURCE_DIR}/etc/lovr.html\""
