@@ -569,7 +569,6 @@ static int l_lovrBufferSetData(lua_State* L) {
     void* data = lovrBufferSetData(buffer, dstOffset, extent);
     luax_assert(L, data);
     memcpy(data, (char*) blob->data + srcOffset, extent);
-    lovrBufferFlush(buffer);
     return 0;
   }
 
@@ -604,13 +603,11 @@ static int l_lovrBufferSetData(lua_State* L) {
       char* data = lovrBufferSetData(buffer, dstIndex * format->stride, count * format->stride);
       luax_assert(L, data);
       luax_checkarray(L, 2, srcIndex + 1, (int) count, format, data);
-      lovrBufferFlush(buffer);
     } else {
       luaL_checkany(L, 2);
       char* data = lovrBufferSetData(buffer, 0, format->stride);
       luax_assert(L, data);
       luax_checkbufferdata(L, 2, format, data);
-      lovrBufferFlush(buffer);
     }
 
     return 0;

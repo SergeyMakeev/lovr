@@ -200,7 +200,6 @@ void* lovrBufferGetData(Buffer* buffer, uint32_t offset, uint32_t extent);
 void* lovrBufferSetData(Buffer* buffer, uint32_t offset, uint32_t extent);
 bool lovrBufferCopy(Buffer* src, Buffer* dst, uint32_t srcOffset, uint32_t dstOffset, uint32_t extent);
 bool lovrBufferClear(Buffer* buffer, uint32_t offset, uint32_t extent, uint32_t value);
-void lovrBufferFlush(Buffer* buffer);
 
 // Texture
 
@@ -475,10 +474,8 @@ Buffer* lovrMeshGetIndexBuffer(Mesh* mesh);
 bool lovrMeshSetIndexBuffer(Mesh* mesh, Buffer* buffer);
 void* lovrMeshGetVertices(Mesh* mesh, uint32_t index, uint32_t count);
 void* lovrMeshSetVertices(Mesh* mesh, uint32_t index, uint32_t count);
-void lovrMeshFlushVertices(Mesh* mesh);
 bool lovrMeshGetIndices(Mesh* mesh, void** indices, uint32_t* count, DataType* type);
 void* lovrMeshSetIndices(Mesh* mesh, uint32_t count, DataType type);
-void lovrMeshFlushIndices(Mesh* mesh);
 bool lovrMeshGetTriangles(Mesh* mesh, float** vertices, uint32_t** indices, uint32_t* vertexCount, uint32_t* indexCount);
 bool lovrMeshGetBoundingBox(Mesh* mesh, float box[6]);
 void lovrMeshSetBoundingBox(Mesh* mesh, float box[6]);
