@@ -26,6 +26,7 @@ option(LOVR_USE_LUAU "Use Luau instead of Lua" OFF)
 option(LOVR_USE_GLSLANG "Use glslang to compile GLSL shaders" ON)
 option(LOVR_USE_VULKAN "Use the Vulkan renderer" ON)
 option(LOVR_USE_WEBGPU "Use the WebGPU renderer" OFF)
+option(LOVR_USE_TINCTURE "Use tincture to compile shaders" OFF)
 option(LOVR_USE_STEAM_AUDIO "Enable the Steam Audio spatializer (be sure to also set LOVR_STEAM_AUDIO_PATH)" OFF)
 
 option(LOVR_SANITIZE "Enable Address Sanitizer" OFF)
@@ -60,6 +61,7 @@ if(EMSCRIPTEN)
   endif()
   set(CMAKE_EXECUTABLE_SUFFIX ".html")
   set(LOVR_USE_WEBGPU ON)
+  set(LOVR_USE_TINCTURE ON)
   set(LOVR_USE_VULKAN OFF)
 elseif(MSVC)
   add_compile_options(/MP)
@@ -218,6 +220,13 @@ if(LOVR_USE_GLSLANG)
   set(LOVR_GLSLANG glslang glslang-default-resource-limits)
 endif()
 
+# tincture
+if(LOVR_USE_TINCTURE)
+  add_subdirectory(deps/tincture tincture)
+  list(APPEND LOVR_INCLUDES deps/tincture)
+  set(LOVR_TINCTURE tincture)
+endif()
+
 # OpenXR
 if(LOVR_ENABLE_HEADSET)
   if(LOVR_SYSTEM_OPENXR AND NOT ANDROID)
@@ -312,6 +321,7 @@ target_link_libraries(lovr
   ${LOVR_MSDF}
   ${LOVR_JOLT}
   ${LOVR_GLSLANG}
+  ${LOVR_TINCTURE}
   ${LOVR_OPENXR}
   ${LOVR_PTHREADS}
   ${EMSCRIPTEN_LINKER_FLAGS}
