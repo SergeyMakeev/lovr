@@ -34,3 +34,6 @@
 [submodule "deps/luau"]
 	path = deps/luau
 	url = https://github.com/bjornbytes/luau.git
+[submodule "deps/tincture"]
+	path = deps/tincture
+	url = https://github.com/bjornbytes/tincture
