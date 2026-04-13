@@ -293,6 +293,7 @@ struct Model {
   Mesh** meshes;
   Texture** textures;
   Material** materials;
+  Material** materialOverrides;
   bool* nodeVisibility;
   NodeTransform* localTransforms;
   float* globalTransforms;
@@ -5309,6 +5310,16 @@ Model* lovrModelClone(Model* parent) {
     lovrModelResetNodeTransforms(model);
   }
 
+  if (parent->materialOverrides) {
+    model->materialOverrides = lovrMalloc(meta->materialCount * sizeof(Material*));
+    memcpy(model->materialOverrides, parent->materialOverrides, meta->materialCount * sizeof(Material*));
+    for (uint32_t i = 0; i < meta->materialCount; i++) {
+      if (model->materialOverrides[i]) {
+        lovrRetain(model->materialOverrides[i]);
+      }
+    }
+  }
+
   return model;
 }
 
@@ -5335,6 +5346,14 @@ void lovrModelDestroy(void* ref) {
     }
     lovrFree(model->materials);
     lovrFree(model->textures);
+  }
+  if (model->materialOverrides) {
+    for (uint32_t i = 0; i < meta->materialCount; i++) {
+      if (model->materialOverrides[i]) {
+        lovrRelease(model->materialOverrides[i], lovrMaterialDestroy);
+      }
+    }
+    lovrFree(model->materialOverrides);
   }
   if (model->meshes) {
     for (uint32_t i = 0; i < meta->meshCount; i++) {
@@ -5555,6 +5574,8 @@ Buffer* lovrModelGetIndexBuffer(Model* model) {
   return model->indexBuffer;
 }
 
+static Material* lovrModelResolvePartMaterial(Model* model, uint32_t partMaterialIndex);
+
 Mesh* lovrModelGetMesh(Model* model, uint32_t index) {
   ModelMetadata* meta = &model->meta;
   uint32_t meshCount = meta->meshCount;
@@ -5588,8 +5609,11 @@ Mesh* lovrModelGetMesh(Model* model, uint32_t index) {
       default: lovrUnreachable();
     }
 
-    if (model->materials && part->material != ~0u) {
-      lovrMeshSetMaterial(mesh, model->materials[part->material]);
+    {
+      Material* mat = lovrModelResolvePartMaterial(model, part->material);
+      if (mat) {
+        lovrMeshSetMaterial(mesh, mat);
+      }
     }
 
     float bounds[6];
@@ -5612,6 +5636,53 @@ Material* lovrModelGetMaterial(Model* model, uint32_t index) {
   uint32_t count = model->meta.materialCount;
   lovrCheck(index < count, "Invalid material index '%d' (Model has %d material%s)", index + 1, count, count == 1 ? "" : "s");
   return model->materials[index];
+}
+
+static Material* lovrModelResolvePartMaterial(Model* model, uint32_t partMaterialIndex) {
+  if (partMaterialIndex == ~0u) {
+    return NULL;
+  }
+  ModelMetadata* meta = &model->meta;
+  if (partMaterialIndex >= meta->materialCount) {
+    return NULL;
+  }
+  if (model->materialOverrides && model->materialOverrides[partMaterialIndex]) {
+    return model->materialOverrides[partMaterialIndex];
+  }
+  return model->materials ? model->materials[partMaterialIndex] : NULL;
+}
+
+void lovrModelSetMaterialOverride(Model* model, uint32_t materialIndex, Material* material) {
+  ModelMetadata* meta = &model->meta;
+  lovrCheck(materialIndex < meta->materialCount, "Invalid material index '%d' (Model has %d material%s)", materialIndex + 1, meta->materialCount, meta->materialCount == 1 ? "" : "s");
+  if (!model->materials) {
+    return;
+  }
+  if (!model->materialOverrides) {
+    model->materialOverrides = lovrCalloc(meta->materialCount * sizeof(Material*));
+  }
+  Material* old = model->materialOverrides[materialIndex];
+  if (old) {
+    lovrRelease(old, lovrMaterialDestroy);
+  }
+  model->materialOverrides[materialIndex] = material;
+  if (material) {
+    lovrRetain(material);
+  }
+  if (model->meshes) {
+    for (uint32_t i = 0; i < meta->meshCount; i++) {
+      if (model->meshes[i]) {
+        lovrRelease(model->meshes[i], lovrMeshDestroy);
+        model->meshes[i] = NULL;
+      }
+    }
+  }
+}
+
+Material* lovrModelGetMaterialOverride(Model* model, uint32_t materialIndex) {
+  ModelMetadata* meta = &model->meta;
+  lovrCheck(materialIndex < meta->materialCount, "Invalid material index '%d' (Model has %d material%s)", materialIndex + 1, meta->materialCount, meta->materialCount == 1 ? "" : "s");
+  return model->materialOverrides ? model->materialOverrides[materialIndex] : NULL;
 }
 
 static bool lovrModelAnimateVertices(Model* model) {
@@ -8657,7 +8728,7 @@ static bool drawNode(Pass* pass, Model* model, uint32_t index, uint32_t instance
 
       DrawInfo draw = {
         .mode = part->mode == DRAW_POINT_LIST ? DRAW_POINTS : part->mode == DRAW_LINE_LIST ? DRAW_LINES : DRAW_TRIANGLES,
-        .material = model->materials && part->material != ~0u ? model->materials[part->material] : NULL,
+        .material = lovrModelResolvePartMaterial(model, part->material),
         .transform = node->skin == ~0u ? globalTransform : NULL,
         .bounds = bounds,
         .vertex.buffer = model->vertexBuffer,
@@ -8734,7 +8805,7 @@ bool lovrPassDrawPart(Pass* pass, Model* model, uint32_t meshIndex, uint32_t par
 
     DrawInfo draw = {
       .mode = part->mode == DRAW_POINT_LIST ? DRAW_POINTS : part->mode == DRAW_LINE_LIST ? DRAW_LINES : DRAW_TRIANGLES,
-      .material = model->materials && part->material != ~0u ? model->materials[part->material] : NULL,
+      .material = lovrModelResolvePartMaterial(model, part->material),
       .transform = transform, // TODO fix skinned mesh transforms?
       .bounds = part->bounds,
       .vertex.buffer = model->vertexBuffer,
