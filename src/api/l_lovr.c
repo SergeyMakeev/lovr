@@ -1,8 +1,16 @@
 #include "api.h"
 #include "util.h"
+#include <stdio.h>
 
 #define _STRINGIFY(x) #x
 #define STRINGIFY(x) _STRINGIFY(x)
+
+// Ensures stderr/stdout hit disk when --log-file redirected stdio (Lua io.flush is not always enough).
+static int l_lovrFlushStdio(lua_State* L) {
+  fflush(stdout);
+  fflush(stderr);
+  return 0;
+}
 
 static int l_lovrGetVersion(lua_State* L) {
   lua_pushinteger(L, LOVR_VERSION_MAJOR);
@@ -19,6 +27,7 @@ static int l_lovrGetVersion(lua_State* L) {
 
 static const luaL_Reg lovr[] = {
   { "_setConf", luax_setconf },
+  { "_flushStdio", l_lovrFlushStdio },
   { "getVersion", l_lovrGetVersion },
   { NULL, NULL }
 };

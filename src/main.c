@@ -94,6 +94,8 @@ int main(int argc, char** argv) {
     int status = luax_loadbufferx(L, (const char*) etc_boot_lua, etc_boot_lua_len, "@boot.lua", NULL);
     if (status != 0 || lua_pcall(L, 0, 1, -2)) {
       fprintf(stderr, "%s\n", lua_tostring(L, -1));
+      fflush(stderr);
+      fflush(stdout);
       os_destroy();
       return 3;
     }
@@ -108,10 +110,14 @@ int main(int argc, char** argv) {
     if (lua_type(T, 1) == LUA_TSTRING && !strcmp(lua_tostring(T, 1), "restart")) {
       luax_checkvariant(T, 2, &cookie);
       if (cookie.type == TYPE_OBJECT) memset(&cookie, 0, sizeof(cookie));
+      fflush(stdout);
+      fflush(stderr);
       luax_close(L);
       continue;
     } else {
       int status = lua_tointeger(T, 1);
+      fflush(stdout);
+      fflush(stderr);
       luax_close(L);
       os_destroy();
       return status;

@@ -373,9 +373,8 @@ end
 local function lovrFlushLog()
   local h = lovr._test and lovr._test.logFileHandle
   if h then h:flush() end
-  if os.getenv('LOVR_STDIO_LOG') == '1' then
-    io.flush()
-  end
+  io.flush()
+  if lovr._flushStdio then lovr._flushStdio() end
 end
 
 local function lovrExitCodeForError(msg)
