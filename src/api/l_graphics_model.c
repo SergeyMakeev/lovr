@@ -253,26 +253,6 @@ static int l_lovrModelGetMaterial(lua_State* L) {
   return 1;
 }
 
-static int l_lovrModelSetMaterialOverride(lua_State* L) {
-  Model* model = luax_checktype(L, 1, Model);
-  uint32_t index = luax_checkmaterialindex(L, 2, lovrModelGetMetadata(model));
-  Material* material = lua_isnoneornil(L, 3) ? NULL : luax_checktype(L, 3, Material);
-  lovrModelSetMaterialOverride(model, index, material);
-  return 0;
-}
-
-static int l_lovrModelGetMaterialOverride(lua_State* L) {
-  Model* model = luax_checktype(L, 1, Model);
-  uint32_t index = luax_checkmaterialindex(L, 2, lovrModelGetMetadata(model));
-  Material* material = lovrModelGetMaterialOverride(model, index);
-  if (material) {
-    luax_pushtype(L, Material, material);
-  } else {
-    lua_pushnil(L);
-  }
-  return 1;
-}
-
 static int l_lovrModelBuildRaytracer(lua_State* L) {
   Model* model = luax_checktype(L, 1, Model);
   luax_assert(L, lovrModelBuildRaytracer(model));
@@ -412,8 +392,6 @@ const luaL_Reg lovrModel[] = {
   { "getMaterialCount", l_lovrModelMetaGetMaterialCount },
   { "getMaterialName", l_lovrModelMetaGetMaterialName },
   { "getMaterial", l_lovrModelGetMaterial },
-  { "setMaterialOverride", l_lovrModelSetMaterialOverride },
-  { "getMaterialOverride", l_lovrModelGetMaterialOverride },
   { "buildRaytracer", l_lovrModelBuildRaytracer },
 
   { "getVertexBuffer", l_lovrModelGetVertexBuffer }, // Deprecated

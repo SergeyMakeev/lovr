@@ -520,8 +520,6 @@ Buffer* lovrModelGetIndexBuffer(Model* model);
 Mesh* lovrModelGetMesh(Model* model, uint32_t index);
 Texture* lovrModelGetTexture(Model* model, uint32_t index);
 Material* lovrModelGetMaterial(Model* model, uint32_t index);
-void lovrModelSetMaterialOverride(Model* model, uint32_t materialIndex, Material* material);
-Material* lovrModelGetMaterialOverride(Model* model, uint32_t materialIndex);
 bool lovrModelBuildRaytracer(Model* model);
 
 // Raytracer
