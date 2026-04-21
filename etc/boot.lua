@@ -66,6 +66,12 @@ local conf = {
     resizable = false,
     title = 'LÖVR',
     icon = nil
+  },
+  test = {
+    interactiveErrors = true,
+    fatalErrors = false,
+    logFile = nil,
+    runFrames = nil
   }
 }
 
@@ -142,6 +148,41 @@ function lovr.boot()
 
   if ok and cli then ok, failure = pcall(cli, conf) end
 
+  do
+    local t = conf.test or {}
+    lovr._test = {
+      interactiveErrors = t.interactiveErrors ~= false,
+      fatalErrors = t.fatalErrors == true,
+      logFile = t.logFile,
+      runFrames = t.runFrames,
+      logFileHandle = nil
+    }
+    -- `--log-file=...` is applied in `main.c`: stdout and stderr are redirected to that file so C,
+    -- Lua `print`, and anything using stdio goes to the log. `LOVR_STDIO_LOG=1` is set in that case.
+    if lovr._test.logFile and #lovr._test.logFile > 0 and os.getenv('LOVR_STDIO_LOG') ~= '1' then
+      local h, err = io.open(lovr._test.logFile, 'w')
+      if not h then
+        error(('Could not open log file %q: %s'):format(lovr._test.logFile, tostring(err)), 0)
+      end
+      lovr._test.logFileHandle = h
+      local oldLog = lovr.log
+      function lovr.log(message, level, tag)
+        oldLog(message, level, tag)
+        h:write(message:gsub('\n$', '') .. '\n')
+        h:flush()
+      end
+      local oldPrint = print
+      function print(...)
+        oldPrint(...)
+        local n = select('#', ...)
+        local parts = {}
+        for i = 1, n do parts[i] = tostring(select(i, ...)) end
+        h:write(table.concat(parts, '\t') .. '\n')
+        h:flush()
+      end
+    end
+  end
+
   -- Boot!
 
   for module in pairs(conf.modules) do
@@ -186,6 +227,9 @@ end
 function lovr.run()
   if lovr.timer then lovr.timer.step() end
   if lovr.load then lovr.load(arg) end
+  local test = lovr._test
+  local runFrames = test and test.runFrames
+  local frameCount = 0
   return function()
     if lovr.headset then lovr.headset.pollEvents() end
     if lovr.system then lovr.system.pollEvents() end
@@ -219,6 +263,12 @@ function lovr.run()
       lovr.graphics.present()
     elseif lovr.headset then
       lovr.headset.submit()
+    end
+    if runFrames and lovr.event then
+      frameCount = frameCount + 1
+      if frameCount >= runFrames then
+        lovr.event.quit(0)
+      end
     end
   end
 end
@@ -320,13 +370,45 @@ local function formatTraceback(s)
   return s:gsub('\n[^\n]+$', ''):gsub('\t', ''):gsub('stack traceback:', '\nStack:\n')
 end
 
+local function lovrFlushLog()
+  local h = lovr._test and lovr._test.logFileHandle
+  if h then h:flush() end
+  if os.getenv('LOVR_STDIO_LOG') == '1' then
+    io.flush()
+  end
+end
+
+local function lovrExitCodeForError(msg)
+  local s = tostring(msg or '')
+  if s:find('Failed to initialize GPU', 1, true) or s:find('Could not open window', 1, true) then
+    return 2
+  end
+  return 1
+end
+
 function lovr.errhand(message)
   message = 'Error:\n\n' .. tostring(message) .. formatTraceback(debug and debug.traceback('', 4) or '')
 
   print(message)
+  lovrFlushLog()
+
+  local test = lovr._test
+  local nonInteractive = test and (test.fatalErrors or not test.interactiveErrors)
+
+  if nonInteractive then
+    local code = lovrExitCodeForError(message)
+    return function()
+      lovrFlushLog()
+      return code
+    end
+  end
 
   if not lovr.graphics or not lovr.graphics.isInitialized() then
-    return function() return 1 end
+    local code = lovrExitCodeForError(message)
+    return function()
+      lovrFlushLog()
+      return code
+    end
   end
 
   if lovr.audio then lovr.audio.stop() end
@@ -429,8 +511,11 @@ lovr.handlers = setmetatable({}, { __index = lovr })
 return coroutine.create(function()
   local function onerror(...)
     onerror = function(...)
-      print('Error:\n\n' .. tostring(...) .. formatTraceback(debug and debug.traceback('', 1) or ''))
-      return function() return 1 end
+      local err = select(1, ...)
+      print('Error:\n\n' .. tostring(err) .. formatTraceback(debug and debug.traceback('', 1) or ''))
+      lovrFlushLog()
+      local code = lovrExitCodeForError(err)
+      return function() return code end
     end
 
     local ok, result = pcall(lovr.errhand or onerror, ...)

@@ -7,9 +7,72 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#include <fcntl.h>
+#endif
+
+// If argv contains `--log-file=PATH` (or `--log-file` + PATH), redirect both stdout and stderr
+// to that file so C, Lua print, and driver messages that go through stdio land in one place.
+static void lovr_stdio_log_from_argv(int argc, char** argv) {
+  const char* path = NULL;
+  for (int i = 1; i < argc; i++) {
+    if (strncmp(argv[i], "--log-file=", 11) == 0 && argv[i][11]) {
+      path = argv[i] + 11;
+      break;
+    }
+    if (!strcmp(argv[i], "--log-file") && i + 1 < argc && argv[i + 1][0] != '-') {
+      path = argv[++i];
+      break;
+    }
+  }
+  if (!path || !path[0]) {
+    return;
+  }
+
+#ifdef _WIN32
+  FILE* log = fopen(path, "wb");
+  if (!log) {
+    return;
+  }
+  int logfd = _fileno(log);
+  fflush(stdout);
+  fflush(stderr);
+  if (_dup2(logfd, _fileno(stdout)) < 0 || _dup2(logfd, _fileno(stderr)) < 0) {
+    return;
+  }
+  setvbuf(stdout, NULL, _IONBF, 0);
+  setvbuf(stderr, NULL, _IONBF, 0);
+#else
+  fflush(stdout);
+  fflush(stderr);
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0) {
+    return;
+  }
+  if (dup2(fd, STDOUT_FILENO) < 0 || dup2(fd, STDERR_FILENO) < 0) {
+    close(fd);
+    return;
+  }
+  if (fd > 2) {
+    close(fd);
+  }
+  setvbuf(stdout, NULL, _IONBF, 0);
+  setvbuf(stderr, NULL, _IONBF, 0);
+#endif
+
+#if defined(_WIN32)
+  _putenv_s("LOVR_STDIO_LOG", "1");
+#else
+  setenv("LOVR_STDIO_LOG", "1", 1);
+#endif
+}
 
 int main(int argc, char** argv) {
   os_init();
+  lovr_stdio_log_from_argv(argc, argv);
 
   for (;;) {
     lua_State* L = luaL_newstate();
@@ -32,7 +95,7 @@ int main(int argc, char** argv) {
     if (status != 0 || lua_pcall(L, 0, 1, -2)) {
       fprintf(stderr, "%s\n", lua_tostring(L, -1));
       os_destroy();
-      return 1;
+      return 3;
     }
 
     lua_State* T = lua_tothread(L, -1);

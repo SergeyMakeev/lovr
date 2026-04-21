@@ -683,15 +683,30 @@ bool lovrGraphicsInit(GraphicsConfig* config) {
   };
 
   if (!gpu_init(&gpu)) {
+    const char* gpu_err = gpu_get_error();
+    fprintf(stderr,
+      "LOVR_GPU_INIT: lovrGraphicsInit failed. detail=%s\n"
+      "LOVR_GPU_INIT: hints=GPU-less runners: LOVR_GPULESS=1 (prefer Lavapipe/CPU device), VK_ICD_FILENAMES, LOVR_GPU_VERBOSE=1 (list devices). Grep stderr for LOVR_GPU_INIT.\n",
+      gpu_err);
 #if _WIN32
-    const char* format = "This program requires a graphics card with support for Vulkan 1.1, but no device was found or it failed to initialize properly.  The error message was:\n\n%s";
-    size_t size = snprintf(NULL, 0, format, gpu_get_error()) + 1;
-    char* string = lovrMalloc(size);
-    snprintf(string, size, format, gpu_get_error());
-    os_window_message_box(string);
-    lovrFree(string);
+    bool showDialog = true;
+    const char* gpuless = getenv("LOVR_GPULESS");
+    if (gpuless && gpuless[0] && strcmp(gpuless, "0") != 0) {
+      showDialog = false;
+    }
+    if (getenv("LOVR_SUPPRESS_GPU_DIALOG") && getenv("LOVR_SUPPRESS_GPU_DIALOG")[0] != '0') {
+      showDialog = false;
+    }
+    if (showDialog) {
+      const char* format = "This program requires a graphics card with support for Vulkan 1.1, but no device was found or it failed to initialize properly.  The error message was:\n\n%s";
+      size_t size = snprintf(NULL, 0, format, gpu_err) + 1;
+      char* string = lovrMalloc(size);
+      snprintf(string, size, format, gpu_err);
+      os_window_message_box(string);
+      lovrFree(string);
+    }
 #endif
-    lovrSetError("Failed to initialize GPU: %s", gpu_get_error());
+    lovrSetError("Failed to initialize GPU: %s", gpu_err);
     lovrFree(thread.stack.memory);
     lovrModuleReset(&ref);
     return false;

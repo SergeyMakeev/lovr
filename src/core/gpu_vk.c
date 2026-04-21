@@ -1,4 +1,6 @@
 #include "gpu.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <threads.h>
 #include <stdatomic.h>
@@ -235,7 +237,7 @@ typedef struct gpu_thread_state {
   struct gpu_thread_state* next;
   gpu_stream_pool* streamPools;
   gpu_stream_pool* activeStreamPool;
-  char error[255];
+  char error[1024];
   bool initialized;
 } gpu_thread_state;
 
@@ -296,6 +298,11 @@ static void nickname(void* object, VkObjectType type, const char* name);
 static bool vkcheck(VkResult result, const char* function);
 static void vkerror(VkResult result, const char* function);
 static void error(const char* message);
+static void gpu_log_stderr(const char* text);
+static bool env_truthy(const char* value);
+static bool prefer_software_device(void);
+static int physical_device_type_rank(VkPhysicalDeviceType type, bool softwareFirst);
+static int cmp_devices(const void* a, const void* b);
 
 // Loader
 
@@ -2851,6 +2858,86 @@ void gpu_xr_release(gpu_stream* stream, gpu_texture* texture) {
   });
 }
 
+typedef struct {
+  VkPhysicalDevice device;
+  VkPhysicalDeviceProperties props;
+} gpu_adapter_candidate;
+
+static void gpu_log_stderr(const char* text) {
+  if (!text || !*text) {
+    return;
+  }
+  fprintf(stderr, "LOVR_GPU_INIT: %s\n", text);
+}
+
+static bool env_truthy(const char* value) {
+  if (!value || !*value) {
+    return false;
+  }
+  if (!strcmp(value, "0")) {
+    return false;
+  }
+  if (!strcmp(value, "false") || !strcmp(value, "FALSE") || !strcmp(value, "no") || !strcmp(value, "NO")) {
+    return false;
+  }
+  return true;
+}
+
+static bool prefer_software_device(void) {
+  const char* pref = getenv("LOVR_GPU_PREFERENCE");
+  if (pref && pref[0]) {
+    if (!strcmp(pref, "cpu") || !strcmp(pref, "software") || !strcmp(pref, "swiftshader")) {
+      return true;
+    }
+    if (!strcmp(pref, "discrete") || !strcmp(pref, "performance") || !strcmp(pref, "dedicated")) {
+      return false;
+    }
+  }
+  return env_truthy(getenv("LOVR_GPULESS"));
+}
+
+static int physical_device_type_rank(VkPhysicalDeviceType type, bool softwareFirst) {
+  if (softwareFirst) {
+    switch (type) {
+      case VK_PHYSICAL_DEVICE_TYPE_CPU:
+        return 0;
+      case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+        return 1;
+      case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+        return 2;
+      case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+        return 3;
+      default:
+        return 4;
+    }
+  } else {
+    switch (type) {
+      case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+        return 0;
+      case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+        return 1;
+      case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+        return 2;
+      case VK_PHYSICAL_DEVICE_TYPE_CPU:
+        return 3;
+      default:
+        return 4;
+    }
+  }
+}
+
+static int cmp_devices(const void* a, const void* b) {
+  const gpu_adapter_candidate* da = (const gpu_adapter_candidate*) a;
+  const gpu_adapter_candidate* db = (const gpu_adapter_candidate*) b;
+  bool sf = prefer_software_device();
+  int ra = physical_device_type_rank(da->props.deviceType, sf);
+  int rb = physical_device_type_rank(db->props.deviceType, sf);
+  if (ra != rb) {
+    return ra > rb ? 1 : (ra < rb ? -1 : 0);
+  }
+  return strcmp(da->props.deviceName, db->props.deviceName);
+}
+
 // Entry
 
 bool gpu_init(gpu_config* config) {
@@ -2982,8 +3069,50 @@ bool gpu_init(gpu_config* config) {
     }
 
     if (!state.adapter) {
-      uint32_t deviceCount = 1;
-      VK(vkEnumeratePhysicalDevices(state.instance, &deviceCount, &state.adapter), "vkEnumeratePhysicalDevices") goto fail;
+      uint32_t deviceCount = 0;
+      VK(vkEnumeratePhysicalDevices(state.instance, &deviceCount, NULL), "vkEnumeratePhysicalDevices") goto fail;
+      if (deviceCount == 0) {
+        error("No Vulkan physical devices. Check drivers and VK_ICD_FILENAMES / VK_DRIVER_FILES (e.g. Mesa Lavapipe on GPU-less CI).");
+        goto fail;
+      }
+
+      VkPhysicalDevice* devices = config->fnAlloc(deviceCount * sizeof(VkPhysicalDevice));
+      ASSERT(devices, "Out of memory") goto fail;
+
+      if (!vkcheck(vkEnumeratePhysicalDevices(state.instance, &deviceCount, devices), "vkEnumeratePhysicalDevices")) {
+        config->fnFree(devices);
+        goto fail;
+      }
+
+      gpu_adapter_candidate* infos = config->fnAlloc(deviceCount * sizeof(gpu_adapter_candidate));
+      if (!infos) {
+        error("Out of memory");
+        config->fnFree(devices);
+        goto fail;
+      }
+
+      for (uint32_t i = 0; i < deviceCount; i++) {
+        VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+        vkGetPhysicalDeviceProperties2(devices[i], &p2);
+        infos[i].device = devices[i];
+        infos[i].props = p2.properties;
+      }
+      config->fnFree(devices);
+
+      bool sf = prefer_software_device();
+      qsort(infos, deviceCount, sizeof(gpu_adapter_candidate), cmp_devices);
+
+      if (env_truthy(getenv("LOVR_GPU_VERBOSE"))) {
+        for (uint32_t i = 0; i < deviceCount; i++) {
+          fprintf(stderr, "LOVR_GPU_INIT: physical_device[%u] name=%s type=%d\n", (unsigned) i, infos[i].props.deviceName,
+            (int) infos[i].props.deviceType);
+        }
+      }
+
+      fprintf(stderr, "LOVR_GPU_INIT: selected=%s type=%d software_first=%d\n", infos[0].props.deviceName, (int) infos[0].props.deviceType, sf ? 1 : 0);
+
+      state.adapter = infos[0].device;
+      config->fnFree(infos);
     }
 
     if (!state.adapter) {
@@ -4235,11 +4364,13 @@ static void vkerror(VkResult result, const char* function) {
     memcpy(thread.error, function, length);
     thread.error[length] = '\0';
   }
+  gpu_log_stderr(thread.error);
 }
 
 static void error(const char* error) {
   size_t length = strlen(error);
-  length = MIN(length, sizeof(thread.error));
+  length = MIN(length, sizeof(thread.error) - 1u);
   memcpy(thread.error, error, length);
   thread.error[length] = '\0';
+  gpu_log_stderr(thread.error);
 }

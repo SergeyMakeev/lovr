@@ -5,8 +5,30 @@ function lovr.arg(arg)
     console = { long = '--console', help = 'Attach Windows console' },
     debug = { long = '--debug', help = 'Enable debugging checks and logging' },
     simulator = { long = '--simulator', help = 'Force headset simulator' },
-    watch = { short = '-w', long = '--watch', help = 'Watch files and restart on change' }
+    watch = { short = '-w', long = '--watch', help = 'Watch files and restart on change' },
+    fatalErrors = { long = '--fatal-errors', help = 'Uncaught Lua error: no interactive overlay; exit with error code immediately' },
+    _logFile = { long = '--log-file=PATH', help = 'Redirect stdout/stderr (full process log) to PATH; best for CI' },
+    _runFrames = { long = '--run-frames=N', help = 'Exit with 0 after N frames' },
+    noVsync = { long = '--no-vsync', help = 'Disable vsync (conf.graphics.vsync = false)' }
   }
+
+  do
+    local i = 1
+    while i <= #arg do
+      local a = arg[i]
+      local lf = type(a) == 'string' and a:match('^%-%-log%-file=(.*)$')
+      local rf = type(a) == 'string' and a:match('^%-%-run%-frames=(%d+)$')
+      if lf then
+        arg.logFile = lf ~= '' and lf or nil
+        table.remove(arg, i)
+      elseif rf then
+        arg.runFrames = tonumber(rf)
+        table.remove(arg, i)
+      else
+        i = i + 1
+      end
+    end
+  end
 
   local shift
 
@@ -84,6 +106,18 @@ function lovr.arg(arg)
 
     if arg.watch then
       lovr.filesystem.watch()
+    end
+
+    conf.test = conf.test or {}
+    if arg.logFile then conf.test.logFile = arg.logFile end
+    if arg.runFrames then conf.test.runFrames = arg.runFrames end
+    if arg.fatalErrors then
+      conf.test.fatalErrors = true
+      conf.test.interactiveErrors = false
+    end
+
+    if arg.noVsync and conf.graphics then
+      conf.graphics.vsync = false
     end
   end
 end
