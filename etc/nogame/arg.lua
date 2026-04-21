@@ -12,6 +12,7 @@ function lovr.arg(arg)
     noVsync = { long = '--no-vsync', help = 'Disable vsync (conf.graphics.vsync = false)' }
   }
 
+  local hasLogFile = false
   do
     local i = 1
     while i <= #arg do
@@ -20,9 +21,11 @@ function lovr.arg(arg)
       local rf = type(a) == 'string' and a:match('^%-%-run%-frames=(%d+)$')
       if lf then
         -- `--log-file=PATH` is consumed in main.c (C-level stdio redirect); strip it here.
+        hasLogFile = true
         table.remove(arg, i)
       elseif a == '--log-file' and type(arg[i + 1]) == 'string' and not arg[i + 1]:match('^%-') then
         -- space form: `--log-file PATH` - strip both entries so PATH isn't treated as source.
+        hasLogFile = true
         table.remove(arg, i)
         table.remove(arg, i)
       elseif rf then
@@ -56,9 +59,42 @@ function lovr.arg(arg)
     arg[i - shift], arg[i] = arg[i], nil
   end
 
+  -- `--console`, `--help`, and `--version` all need the console attached so the user can see
+  -- output. `openConsole` is a no-op on non-Windows platforms (Linux/macOS already have one).
+  --
+  -- Design: `--log-file` and `--console` are independent flags and must not alter each other.
+  --   * `--log-file` alone — stdout/stderr point at the log file (handled in C `main.c`), nothing
+  --     goes to any console. The log captures C output (GPU init, driver messages), Lua `print`,
+  --     and Lua `io.stderr:write` / `io.stdout:write`.
+  --   * `--console` alone — stdout/stderr are attached to a Windows console (via `os_open_console`).
+  --     Everything printed from Lua or C shows up there.
+  --   * Both — stdout/stderr stay pointed at the log file (the log remains the source of truth),
+  --     and we additionally mirror Lua-visible output to the attached console so the user sees
+  --     their `print` / `io.stderr:write` calls live. C-level `fprintf(stderr, ...)` can't be
+  --     mirrored from Lua; those messages remain in the log file only.
   if arg.console or arg._help or arg._version then
     local ok, system = pcall(require, 'lovr.system')
     if ok and system then system.openConsole() end
+
+    if arg.console and hasLogFile then
+      local con = io.open('CONOUT$', 'w')
+      if con then
+        con:setvbuf('no')
+
+        -- Tee `print` (and therefore `lovr.log`, which delegates to `print`) to the attached
+        -- console. C-level `fprintf(stderr, ...)` and raw `io.stderr:write` still go only to the
+        -- log file — mirroring those reliably requires an OS-level tee (a pipe + reader thread)
+        -- which is out of scope here.
+        local oldPrint = print
+        function print(...)
+          oldPrint(...)
+          local n = select('#', ...)
+          local parts = {}
+          for i = 1, n do parts[i] = tostring(select(i, ...)) end
+          con:write(table.concat(parts, '\t'), '\n')
+        end
+      end
+    end
   end
 
   if arg._help then

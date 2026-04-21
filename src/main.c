@@ -7,14 +7,27 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
-// If argv contains `--log-file=PATH` (or `--log-file` + PATH), redirect both stdout and stderr
-// to that file so C, Lua print, and driver messages that go through stdio land in one place.
+// If argv contains `--log-file=PATH` (or `--log-file PATH`), redirect stdout and stderr to PATH
+// so the log captures C output (driver/GPU init messages), Lua `print`, and Lua
+// `io.stdout:write` / `io.stderr:write` in one place.
 //
-// Uses freopen rather than dup2 because on Windows lovr links as `/SUBSYSTEM:windows` (GUI app)
-// in Release: there is no console and `_fileno(stdout)` is invalid, so dup2 silently fails and
-// nothing ends up in the log. freopen reassociates the FILE* stream with a fresh fd regardless
-// of whether the original stream was attached to anything.
+// Two things matter for this to behave correctly:
+//
+// 1. `freopen` (not `dup2`) is used to attach the CRT streams. On Windows, lovr links as
+//    `/SUBSYSTEM:windows` in Release: `stdout` / `stderr` start with no OS handle and `dup2`
+//    can't target an fd that's never been opened.
+//
+// 2. After freopen, stdout and stderr own two DIFFERENT OS-level file objects that happen to
+//    point at the same path. On Windows each object tracks its own write position, so writes
+//    from one stream overwrite bytes already written by the other. We fix this by using
+//    `_dup2` / `dup2` to point stderr's fd at stdout's fd, so both CRT streams share a single
+//    underlying kernel file description and one write position.
 static void lovr_stdio_log_from_argv(int argc, char** argv) {
   const char* path = NULL;
   for (int i = 1; i < argc; i++) {
@@ -34,13 +47,28 @@ static void lovr_stdio_log_from_argv(int argc, char** argv) {
   if (!freopen(path, "w", stdout)) {
     return;
   }
-
-  // Point stderr at the same file so a single tail -f shows everything in order.
-  // If freopen on stderr fails for any reason, we still have stdout redirected.
-  freopen(path, "a", stderr);
-
   setvbuf(stdout, NULL, _IONBF, 0);
+
+  // Give stderr a valid fd first. In a Windows GUI-subsystem build stderr has no OS handle at
+  // startup and `_fileno(stderr)` returns an invalid slot that `_dup2` can't use as a target.
+  if (!freopen(path, "a", stderr)) {
+    return;
+  }
   setvbuf(stderr, NULL, _IONBF, 0);
+
+#ifdef _WIN32
+  int sofd = _fileno(stdout);
+  int sefd = _fileno(stderr);
+  if (sofd >= 0 && sefd >= 0 && sofd != sefd) {
+    _dup2(sofd, sefd);
+  }
+#else
+  int sofd = fileno(stdout);
+  int sefd = fileno(stderr);
+  if (sofd >= 0 && sefd >= 0 && sofd != sefd) {
+    dup2(sofd, sefd);
+  }
+#endif
 }
 
 int main(int argc, char** argv) {
