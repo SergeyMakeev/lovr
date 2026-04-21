@@ -7,15 +7,14 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef _WIN32
-#include <io.h>
-#else
-#include <unistd.h>
-#include <fcntl.h>
-#endif
 
 // If argv contains `--log-file=PATH` (or `--log-file` + PATH), redirect both stdout and stderr
 // to that file so C, Lua print, and driver messages that go through stdio land in one place.
+//
+// Uses freopen rather than dup2 because on Windows lovr links as `/SUBSYSTEM:windows` (GUI app)
+// in Release: there is no console and `_fileno(stdout)` is invalid, so dup2 silently fails and
+// nothing ends up in the log. freopen reassociates the FILE* stream with a fresh fd regardless
+// of whether the original stream was attached to anything.
 static void lovr_stdio_log_from_argv(int argc, char** argv) {
   const char* path = NULL;
   for (int i = 1; i < argc; i++) {
@@ -32,42 +31,16 @@ static void lovr_stdio_log_from_argv(int argc, char** argv) {
     return;
   }
 
-#ifdef _WIN32
-  FILE* log = fopen(path, "wb");
-  if (!log) {
+  if (!freopen(path, "w", stdout)) {
     return;
   }
-  int logfd = _fileno(log);
-  fflush(stdout);
-  fflush(stderr);
-  if (_dup2(logfd, _fileno(stdout)) < 0 || _dup2(logfd, _fileno(stderr)) < 0) {
-    return;
-  }
-  setvbuf(stdout, NULL, _IONBF, 0);
-  setvbuf(stderr, NULL, _IONBF, 0);
-#else
-  fflush(stdout);
-  fflush(stderr);
-  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (fd < 0) {
-    return;
-  }
-  if (dup2(fd, STDOUT_FILENO) < 0 || dup2(fd, STDERR_FILENO) < 0) {
-    close(fd);
-    return;
-  }
-  if (fd > 2) {
-    close(fd);
-  }
-  setvbuf(stdout, NULL, _IONBF, 0);
-  setvbuf(stderr, NULL, _IONBF, 0);
-#endif
 
-#if defined(_WIN32)
-  _putenv_s("LOVR_STDIO_LOG", "1");
-#else
-  setenv("LOVR_STDIO_LOG", "1", 1);
-#endif
+  // Point stderr at the same file so a single tail -f shows everything in order.
+  // If freopen on stderr fails for any reason, we still have stdout redirected.
+  freopen(path, "a", stderr);
+
+  setvbuf(stdout, NULL, _IONBF, 0);
+  setvbuf(stderr, NULL, _IONBF, 0);
 }
 
 int main(int argc, char** argv) {

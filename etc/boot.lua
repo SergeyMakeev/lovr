@@ -70,7 +70,6 @@ local conf = {
   test = {
     interactiveErrors = true,
     fatalErrors = false,
-    logFile = nil,
     runFrames = nil
   }
 }
@@ -148,39 +147,15 @@ function lovr.boot()
 
   if ok and cli then ok, failure = pcall(cli, conf) end
 
+  -- `--log-file=PATH` (handled in main.c) redirects stdout/stderr to that file, capturing
+  -- everything print / lovr.log / C write to stdio. No Lua-level tee is needed or supported.
   do
     local t = conf.test or {}
     lovr._test = {
       interactiveErrors = t.interactiveErrors ~= false,
       fatalErrors = t.fatalErrors == true,
-      logFile = t.logFile,
-      runFrames = t.runFrames,
-      logFileHandle = nil
+      runFrames = t.runFrames
     }
-    -- `--log-file=...` is applied in `main.c`: stdout and stderr are redirected to that file so C,
-    -- Lua `print`, and anything using stdio goes to the log. `LOVR_STDIO_LOG=1` is set in that case.
-    if lovr._test.logFile and #lovr._test.logFile > 0 and os.getenv('LOVR_STDIO_LOG') ~= '1' then
-      local h, err = io.open(lovr._test.logFile, 'w')
-      if not h then
-        error(('Could not open log file %q: %s'):format(lovr._test.logFile, tostring(err)), 0)
-      end
-      lovr._test.logFileHandle = h
-      local oldLog = lovr.log
-      function lovr.log(message, level, tag)
-        oldLog(message, level, tag)
-        h:write(message:gsub('\n$', '') .. '\n')
-        h:flush()
-      end
-      local oldPrint = print
-      function print(...)
-        oldPrint(...)
-        local n = select('#', ...)
-        local parts = {}
-        for i = 1, n do parts[i] = tostring(select(i, ...)) end
-        h:write(table.concat(parts, '\t') .. '\n')
-        h:flush()
-      end
-    end
   end
 
   -- Boot!
@@ -371,8 +346,6 @@ local function formatTraceback(s)
 end
 
 local function lovrFlushLog()
-  local h = lovr._test and lovr._test.logFileHandle
-  if h then h:flush() end
   io.flush()
   if lovr._flushStdio then lovr._flushStdio() end
 end

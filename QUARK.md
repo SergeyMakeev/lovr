@@ -38,15 +38,15 @@ This section documents engine behavior relied on by GPU-less runners, log collec
 | Flag | Effect |
 |------|--------|
 | `--fatal-errors` | No interactive error overlay; exit with the right code immediately after an uncaught error. |
-| `--log-file=PATH` or `--log-file PATH` | **Full-process log:** applied in **`main.c` before Lua** — **stdout and stderr** are redirected to `PATH`, so output from **C, Lua `print`, `lovr.log`, and anything using stdio** goes into one file. Sets `LOVR_STDIO_LOG=1` for the runtime. Use this form on the **command line** for complete capture; essential for CI stability. |
+| `--log-file=PATH` or `--log-file PATH` | **Full-process log:** applied in **`main.c` before Lua** — **stdout and stderr** are redirected to `PATH`, so output from **C, Lua `print`, `lovr.log`, and anything using stdio** goes into one file. This is the only log-file mechanism (no separate Lua tee). Essential for CI stability. |
 | `--run-frames=N` | After **N** iterations of the main frame loop, call `lovr.event.quit(0)`. Use for “run a few frames only” CI jobs (e.g. load + draw smoke). |
 | `--no-vsync` | Sets `conf.graphics.vsync = false`. |
 
 ### `conf.lua` — `conf.test`
 
-Fields under `t.test` (optional): `interactiveErrors`, `fatalErrors`, `logFile`, `runFrames`. CLI runs after `lovr.conf` and overrides.
+Fields under `t.test` (optional): `interactiveErrors`, `fatalErrors`, `runFrames`. CLI runs after `lovr.conf` and overrides.
 
-**Log file caveat:** Full stdout/stderr redirection only happens when **`--log-file` is present on the process argv** (handled in C). If you set **only** `conf.test.logFile` in Lua without that CLI flag, the runtime uses a **Lua-only** tee (`print` + `lovr.log`) and does **not** retroactively capture early C output.
+Log file is CLI-only: pass `--log-file=PATH` on argv. There is no `conf.test.logFile`; the file is opened and stdio redirected in `main.c` before Lua runs, so there is nothing to configure from Lua after the fact.
 
 ### Vulkan / GPU-less (Lavapipe, CI)
 

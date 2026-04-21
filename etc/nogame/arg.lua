@@ -19,7 +19,11 @@ function lovr.arg(arg)
       local lf = type(a) == 'string' and a:match('^%-%-log%-file=(.*)$')
       local rf = type(a) == 'string' and a:match('^%-%-run%-frames=(%d+)$')
       if lf then
-        arg.logFile = lf ~= '' and lf or nil
+        -- `--log-file=PATH` is consumed in main.c (C-level stdio redirect); strip it here.
+        table.remove(arg, i)
+      elseif a == '--log-file' and type(arg[i + 1]) == 'string' and not arg[i + 1]:match('^%-') then
+        -- space form: `--log-file PATH` - strip both entries so PATH isn't treated as source.
+        table.remove(arg, i)
         table.remove(arg, i)
       elseif rf then
         arg.runFrames = tonumber(rf)
@@ -109,7 +113,6 @@ function lovr.arg(arg)
     end
 
     conf.test = conf.test or {}
-    if arg.logFile then conf.test.logFile = arg.logFile end
     if arg.runFrames then conf.test.runFrames = arg.runFrames end
     if arg.fatalErrors then
       conf.test.fatalErrors = true
