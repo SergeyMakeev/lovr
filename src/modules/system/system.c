@@ -127,10 +127,6 @@ const char* lovrSystemGetOS(void) {
   return os_get_name();
 }
 
-void lovrSystemOpenConsole(void) {
-  os_open_console();
-}
-
 uint32_t lovrSystemGetCoreCount(void) {
   return os_get_core_count();
 }

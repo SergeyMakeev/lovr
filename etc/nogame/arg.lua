@@ -2,17 +2,22 @@ function lovr.arg(arg)
   local options = {
     _help = { short = '-h', long = '--help', help = 'Show help and exit' },
     _version = { short = '-v', long = '--version', help = 'Show version and exit' },
-    console = { long = '--console', help = 'Attach Windows console' },
     debug = { long = '--debug', help = 'Enable debugging checks and logging' },
     simulator = { long = '--simulator', help = 'Force headset simulator' },
     watch = { short = '-w', long = '--watch', help = 'Watch files and restart on change' },
     fatalErrors = { long = '--fatal-errors', help = 'Uncaught Lua error: no interactive overlay; exit with error code immediately' },
-    _logFile = { long = '--log-file=PATH', help = 'Redirect stdout/stderr (full process log) to PATH; best for CI' },
+    headless = { long = '--headless', help = 'Disable graphics, audio, headset, window, input. Pure Lua (use lovrc.exe on Windows)' },
+    _logFile = { long = '--log-file=PATH', help = 'Add a log sink writing to PATH (parsed in main.c)' },
     _runFrames = { long = '--run-frames=N', help = 'Exit with 0 after N frames' },
     noVsync = { long = '--no-vsync', help = 'Disable vsync (conf.graphics.vsync = false)' }
   }
 
-  local hasLogFile = false
+  -- Pre-scan for flags that can appear anywhere in argv (not just before <source>):
+  --   * `--log-file=PATH` and `--log-file PATH` are consumed in main.c (C-level sink registration)
+  --     before Lua starts. Strip them here so PATH isn't treated as the source path.
+  --   * `--run-frames=N` is engine-level test-mode plumbing.
+  --   * `--headless` is engine-level mode selection; honored regardless of position so
+  --     `lovr test --headless` works (used by build_release.cmd test smoke).
   do
     local i = 1
     while i <= #arg do
@@ -20,16 +25,15 @@ function lovr.arg(arg)
       local lf = type(a) == 'string' and a:match('^%-%-log%-file=(.*)$')
       local rf = type(a) == 'string' and a:match('^%-%-run%-frames=(%d+)$')
       if lf then
-        -- `--log-file=PATH` is consumed in main.c (C-level stdio redirect); strip it here.
-        hasLogFile = true
         table.remove(arg, i)
       elseif a == '--log-file' and type(arg[i + 1]) == 'string' and not arg[i + 1]:match('^%-') then
-        -- space form: `--log-file PATH` - strip both entries so PATH isn't treated as source.
-        hasLogFile = true
         table.remove(arg, i)
         table.remove(arg, i)
       elseif rf then
         arg.runFrames = tonumber(rf)
+        table.remove(arg, i)
+      elseif a == '--headless' then
+        arg.headless = true
         table.remove(arg, i)
       else
         i = i + 1
@@ -57,44 +61,6 @@ function lovr.arg(arg)
 
   for i = 0, #arg do
     arg[i - shift], arg[i] = arg[i], nil
-  end
-
-  -- `--console`, `--help`, and `--version` all need the console attached so the user can see
-  -- output. `openConsole` is a no-op on non-Windows platforms (Linux/macOS already have one).
-  --
-  -- Design: `--log-file` and `--console` are independent flags and must not alter each other.
-  --   * `--log-file` alone — stdout/stderr point at the log file (handled in C `main.c`), nothing
-  --     goes to any console. The log captures C output (GPU init, driver messages), Lua `print`,
-  --     and Lua `io.stderr:write` / `io.stdout:write`.
-  --   * `--console` alone — stdout/stderr are attached to a Windows console (via `os_open_console`).
-  --     Everything printed from Lua or C shows up there.
-  --   * Both — stdout/stderr stay pointed at the log file (the log remains the source of truth),
-  --     and we additionally mirror Lua-visible output to the attached console so the user sees
-  --     their `print` / `io.stderr:write` calls live. C-level `fprintf(stderr, ...)` can't be
-  --     mirrored from Lua; those messages remain in the log file only.
-  if arg.console or arg._help or arg._version then
-    local ok, system = pcall(require, 'lovr.system')
-    if ok and system then system.openConsole() end
-
-    if arg.console and hasLogFile then
-      local con = io.open('CONOUT$', 'w')
-      if con then
-        con:setvbuf('no')
-
-        -- Tee `print` (and therefore `lovr.log`, which delegates to `print`) to the attached
-        -- console. C-level `fprintf(stderr, ...)` and raw `io.stderr:write` still go only to the
-        -- log file — mirroring those reliably requires an OS-level tee (a pipe + reader thread)
-        -- which is out of scope here.
-        local oldPrint = print
-        function print(...)
-          oldPrint(...)
-          local n = select('#', ...)
-          local parts = {}
-          for i = 1, n do parts[i] = tostring(select(i, ...)) end
-          con:write(table.concat(parts, '\t'), '\n')
-        end
-      end
-    end
   end
 
   if arg._help then
@@ -157,6 +123,20 @@ function lovr.arg(arg)
 
     if arg.noVsync and conf.graphics then
       conf.graphics.vsync = false
+    end
+
+    -- `--headless`: hard headless. No GPU device, no window, no audio, no input, no headset.
+    -- Pure Lua + filesystem + math + physics + thread + timer. Designed for CI/data jobs.
+    -- On Windows you also want to invoke `lovrc.exe` so stdio is attached for log output.
+    if arg.headless then
+      conf.modules.graphics = false
+      conf.modules.audio = false
+      conf.modules.headset = false
+      -- system stays loaded so getOS / getCoreCount / clipboard still work, but no window
+      conf.window = nil
+      conf.test = conf.test or {}
+      conf.test.interactiveErrors = false
+      conf.test.fatalErrors = true
     end
   end
 end

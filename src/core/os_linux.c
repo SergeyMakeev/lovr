@@ -80,10 +80,6 @@ uint32_t os_get_core_count(void) {
   return sysconf(_SC_NPROCESSORS_ONLN);
 }
 
-void os_open_console(void) {
-  //
-}
-
 double os_get_time(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);

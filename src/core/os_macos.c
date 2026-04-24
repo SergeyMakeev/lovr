@@ -47,10 +47,6 @@ uint32_t os_get_core_count(void) {
   return count;
 }
 
-void os_open_console(void) {
-  //
-}
-
 double os_get_time(void) {
   return mach_absolute_time() / (double) state.frequency;
 }

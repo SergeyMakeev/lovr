@@ -1,79 +1,60 @@
 #include "api/api.h"
+#include "core/log.h"
 #include "core/os.h"
 #include "util.h"
 #include "boot.lua.h"
 #include <lualib.h>
-#include <stdio.h>
 #include <stdbool.h>
 #include <string.h>
 #include <stdlib.h>
-#ifdef _WIN32
-#include <io.h>
-#else
-#include <unistd.h>
-#endif
 
-// If argv contains `--log-file=PATH` (or `--log-file PATH`), redirect stdout and stderr to PATH
-// so the log captures C output (driver/GPU init messages), Lua `print`, and Lua
-// `io.stdout:write` / `io.stderr:write` in one place.
-//
-// Two things matter for this to behave correctly:
-//
-// 1. `freopen` (not `dup2`) is used to attach the CRT streams. On Windows, lovr links as
-//    `/SUBSYSTEM:windows` in Release: `stdout` / `stderr` start with no OS handle and `dup2`
-//    can't target an fd that's never been opened.
-//
-// 2. After freopen, stdout and stderr own two DIFFERENT OS-level file objects that happen to
-//    point at the same path. On Windows each object tracks its own write position, so writes
-//    from one stream overwrite bytes already written by the other. We fix this by using
-//    `_dup2` / `dup2` to point stderr's fd at stdout's fd, so both CRT streams share a single
-//    underlying kernel file description and one write position.
-static void lovr_stdio_log_from_argv(int argc, char** argv) {
-  const char* path = NULL;
+// Quark log/console design (Windows in particular):
+//   * Two executables: `lovr.exe` (/SUBSYSTEM:windows, no console) and `lovrc.exe`
+//     (/SUBSYSTEM:console, real stdio). Both link the same code; behaviour differs only via
+//     LOVR_CONSOLE_BUILD.
+//   * No `freopen`/`_dup2` stdio juggling. No `AttachConsole`/`AllocConsole`. No `--console` flag.
+//     Instead, every log line in the engine flows through src/core/log.{h,c} which fans the
+//     formatted record out to whatever sinks were registered.
+//   * Default sinks per binary:
+//       - `lovrc.exe`         -> stderr sink
+//       - `lovr.exe`          -> none (silent unless `--log-file=...` is passed)
+//       - Debug builds (both) -> additionally an OutputDebugString sink on Windows
+//   * `--log-file=PATH` (or `--log-file PATH`) is parsed below — before Lua runs and before
+//     graphics initialises — so even GPU init failures land in the file.
+
+static const char* find_log_file_arg(int argc, char** argv) {
   for (int i = 1; i < argc; i++) {
     if (strncmp(argv[i], "--log-file=", 11) == 0 && argv[i][11]) {
-      path = argv[i] + 11;
-      break;
+      return argv[i] + 11;
     }
     if (!strcmp(argv[i], "--log-file") && i + 1 < argc && argv[i + 1][0] != '-') {
-      path = argv[++i];
-      break;
+      return argv[i + 1];
     }
   }
-  if (!path || !path[0]) {
-    return;
-  }
+  return NULL;
+}
 
-  if (!freopen(path, "w", stdout)) {
-    return;
-  }
-  setvbuf(stdout, NULL, _IONBF, 0);
+static void install_default_sinks(void) {
+  log_init();
 
-  // Give stderr a valid fd first. In a Windows GUI-subsystem build stderr has no OS handle at
-  // startup and `_fileno(stderr)` returns an invalid slot that `_dup2` can't use as a target.
-  if (!freopen(path, "a", stderr)) {
-    return;
-  }
-  setvbuf(stderr, NULL, _IONBF, 0);
+#ifdef LOVR_CONSOLE_BUILD
+  log_add_stderr_sink();
+#endif
 
-#ifdef _WIN32
-  int sofd = _fileno(stdout);
-  int sefd = _fileno(stderr);
-  if (sofd >= 0 && sefd >= 0 && sofd != sefd) {
-    _dup2(sofd, sefd);
-  }
-#else
-  int sofd = fileno(stdout);
-  int sefd = fileno(stderr);
-  if (sofd >= 0 && sefd >= 0 && sofd != sefd) {
-    dup2(sofd, sefd);
-  }
+#if defined(_WIN32) && !defined(NDEBUG)
+  log_add_debug_sink();
 #endif
 }
 
 int main(int argc, char** argv) {
+  install_default_sinks();
+
+  const char* log_file_path = find_log_file_arg(argc, argv);
+  if (log_file_path) {
+    log_add_file_sink(log_file_path);
+  }
+
   os_init();
-  lovr_stdio_log_from_argv(argc, argv);
 
   for (;;) {
     lua_State* L = luaL_newstate();
@@ -94,10 +75,10 @@ int main(int argc, char** argv) {
     lua_pushcfunction(L, luax_getstack);
     int status = luax_loadbufferx(L, (const char*) etc_boot_lua, etc_boot_lua_len, "@boot.lua", NULL);
     if (status != 0 || lua_pcall(L, 0, 1, -2)) {
-      fprintf(stderr, "%s\n", lua_tostring(L, -1));
-      fflush(stderr);
-      fflush(stdout);
+      lovrLog(LOG_ERROR, "boot", "%s", lua_tostring(L, -1));
+      log_flush();
       os_destroy();
+      log_shutdown();
       return 3;
     }
 
@@ -111,16 +92,19 @@ int main(int argc, char** argv) {
     if (lua_type(T, 1) == LUA_TSTRING && !strcmp(lua_tostring(T, 1), "restart")) {
       luax_checkvariant(T, 2, &cookie);
       if (cookie.type == TYPE_OBJECT) memset(&cookie, 0, sizeof(cookie));
-      fflush(stdout);
-      fflush(stderr);
+      log_flush();
+      // Detach the Lua sink before tearing down the lua_State, so any logging that happens during
+      // module destruction or the next state's bring-up doesn't reenter a freed thread.
+      lovrSetLogCallback(NULL, NULL);
       luax_close(L);
       continue;
     } else {
       int status = lua_tointeger(T, 1);
-      fflush(stdout);
-      fflush(stderr);
+      log_flush();
+      lovrSetLogCallback(NULL, NULL);
       luax_close(L);
       os_destroy();
+      log_shutdown();
       return status;
     }
   }

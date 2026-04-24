@@ -26,7 +26,10 @@ cmake --build build --config %CMAKE_BUILD_TYPE% || (
   exit /b 1
 )
 
-build\%CMAKE_BUILD_TYPE%\lovr test --headless || (
+rem Run the test smoke through lovrc.exe (console subsystem) so any failure output
+rem actually reaches this terminal. lovr.exe is /SUBSYSTEM:windows and silent unless --log-file
+rem is passed; lovrc.exe is the matching console twin.
+build\%CMAKE_BUILD_TYPE%\lovrc test --headless || (
   echo [build_release] Test failed.
   exit /b 1
 )

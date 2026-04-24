@@ -1,4 +1,5 @@
 #include "gpu.h"
+#include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2867,7 +2868,7 @@ static void gpu_log_stderr(const char* text) {
   if (!text || !*text) {
     return;
   }
-  fprintf(stderr, "LOVR_GPU_INIT: %s\n", text);
+  lovrLog(LOG_INFO, "GPU", "LOVR_GPU_INIT: %s", text);
 }
 
 static bool env_truthy(const char* value) {
@@ -3104,12 +3105,13 @@ bool gpu_init(gpu_config* config) {
 
       if (env_truthy(getenv("LOVR_GPU_VERBOSE"))) {
         for (uint32_t i = 0; i < deviceCount; i++) {
-          fprintf(stderr, "LOVR_GPU_INIT: physical_device[%u] name=%s type=%d\n", (unsigned) i, infos[i].props.deviceName,
-            (int) infos[i].props.deviceType);
+          lovrLog(LOG_INFO, "GPU", "LOVR_GPU_INIT: physical_device[%u] name=%s type=%d",
+            (unsigned) i, infos[i].props.deviceName, (int) infos[i].props.deviceType);
         }
       }
 
-      fprintf(stderr, "LOVR_GPU_INIT: selected=%s type=%d software_first=%d\n", infos[0].props.deviceName, (int) infos[0].props.deviceType, sf ? 1 : 0);
+      lovrLog(LOG_INFO, "GPU", "LOVR_GPU_INIT: selected=%s type=%d software_first=%d",
+        infos[0].props.deviceName, (int) infos[0].props.deviceType, sf ? 1 : 0);
 
       state.adapter = infos[0].device;
       config->fnFree(infos);

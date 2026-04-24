@@ -132,11 +132,6 @@ static int l_lovrSystemGetCoreCount(lua_State* L) {
   return 1;
 }
 
-static int l_lovrSystemOpenConsole(lua_State* L) {
-  lovrSystemOpenConsole();
-  return 0;
-}
-
 static int l_lovrSystemRequestPermission(lua_State* L) {
   Permission permission = luax_checkenum(L, 1, Permission, NULL);
   lovrSystemRequestPermission(permission);
@@ -382,7 +377,6 @@ static int l_lovrSystemGetScrollDelta(lua_State* L) {
 static const luaL_Reg lovrSystem[] = {
   { "getOS", l_lovrSystemGetOS },
   { "getCoreCount", l_lovrSystemGetCoreCount },
-  { "openConsole", l_lovrSystemOpenConsole },
   { "requestPermission", l_lovrSystemRequestPermission },
   { "openWindow", l_lovrSystemOpenWindow },
   { "isWindowOpen", l_lovrSystemIsWindowOpen },

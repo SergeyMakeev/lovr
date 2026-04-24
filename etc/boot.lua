@@ -147,8 +147,24 @@ function lovr.boot()
 
   if ok and cli then ok, failure = pcall(cli, conf) end
 
-  -- `--log-file=PATH` (handled in main.c) redirects stdout/stderr to that file, capturing
-  -- everything print / lovr.log / C write to stdio. No Lua-level tee is needed or supported.
+  -- Quark log model:
+  --   * Engine logging (C, Vulkan validation, GLFW errors, etc.) flows through src/core/log.{h,c}
+  --     to the registered sinks. `--log-file=PATH` adds a file sink in main.c before Lua boots.
+  --   * `lovrc.exe` (console subsystem) has a default stderr sink. `lovr.exe` (GUI) is silent
+  --     unless --log-file is passed.
+  --   * In `lovr.exe` we redirect Lua `print` to call `lovr.log` so user prints reach the file
+  --     sink. In `lovrc.exe` `print` is left alone (users expect raw stderr writes).
+  if not lovr._isConsoleBuild() then
+    local oldPrint = print
+    function print(...)
+      local n = select('#', ...)
+      local parts = {}
+      for i = 1, n do parts[i] = tostring(select(i, ...)) end
+      lovr.log(table.concat(parts, '\t'), 'info', 'lua')
+    end
+    _G._origPrint = oldPrint
+  end
+
   do
     local t = conf.test or {}
     lovr._test = {
@@ -347,7 +363,7 @@ end
 
 local function lovrFlushLog()
   io.flush()
-  if lovr._flushStdio then lovr._flushStdio() end
+  if lovr._flushLog then lovr._flushLog() end
 end
 
 local function lovrExitCodeForError(msg)
@@ -473,9 +489,16 @@ function lovr.filechanged(path, action, oldpath)
   end
 end
 
+-- `lovr.log(message, level, tag)` is the Lua-side log entry/observer.
+--   * Default impl: forward to the engine logger via lovr._log so the message lands in every
+--     registered sink (file/stderr/debug). `src/core/log.c` has a thread-local re-entrancy guard
+--     that prevents looping when SINK_LUA later invokes this function with C-originated logs.
+--   * Users may override this to add overlays, network logging, etc. Calling lovr.log/print/etc
+--     from inside the override is safe (the C guard makes it a no-op).
 function lovr.log(message, level, tag)
-  message = message:gsub('\n$', '')
-  print(message)
+  if lovr._log then
+    lovr._log(level or 'info', tag, tostring(message))
+  end
 end
 
 lovr.handlers = setmetatable({}, { __index = lovr })

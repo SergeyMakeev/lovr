@@ -267,6 +267,7 @@ endif()
 
 set(LOVR_SRC
   src/core/fs.c
+  src/core/log.c
   src/api/api.c
   src/api/l_lovr.c
   src/util.c
@@ -665,15 +666,71 @@ if(WIN32)
     # Excuse unsigned negation for flag-magic bit math
     set_source_files_properties(src/modules/audio/audio.c PROPERTIES COMPILE_FLAGS /wd4146)
     set_source_files_properties(src/lib/minimp3/minimp3.c PROPERTIES COMPILE_FLAGS /wd4267)
-    if(NOT LOVR_BUILD_SHARED)
-      set_target_properties(lovr PROPERTIES LINK_FLAGS_DEBUG "/SUBSYSTEM:console /ENTRY:WinMainCRTStartup")
-      set_target_properties(lovr PROPERTIES LINK_FLAGS_RELEASE "/SUBSYSTEM:windows /ENTRY:WinMainCRTStartup")
-    endif()
+    # Subsystem for `lovr` is set further down in the lovr/lovrc split block (always
+    # /SUBSYSTEM:windows). The console-subsystem twin is the separate `lovrc` target.
   else()
     set_target_properties(lovr PROPERTIES COMPILE_FLAGS "-MP")
   endif()
   target_compile_definitions(lovr PRIVATE _CRT_SECURE_NO_WARNINGS)
   target_compile_definitions(lovr PRIVATE _CRT_NONSTDC_NO_WARNINGS)
+
+  # Quark: split lovr into two binaries on Windows.
+  #   * lovr.exe   - /SUBSYSTEM:windows  (no console attached by default; logs go to --log-file
+  #                  or an OutputDebugString sink in debug builds)
+  #   * lovrc.exe  - /SUBSYSTEM:console  (real stdio, used when you want to see logs in a
+  #                  terminal). Built from the same source; LOVR_CONSOLE_BUILD compile define
+  #                  selects the default stderr sink and disables the print-redirect.
+  # Both binaries embed the same nogame zip postlude so they're each independently runnable.
+  if(LOVR_BUILD_EXE AND NOT LOVR_BUILD_SHARED AND MSVC)
+    set_target_properties(lovr PROPERTIES
+      LINK_FLAGS_DEBUG   "/SUBSYSTEM:windows /ENTRY:WinMainCRTStartup"
+      LINK_FLAGS_RELEASE "/SUBSYSTEM:windows /ENTRY:WinMainCRTStartup"
+    )
+
+    get_target_property(LOVR_CLONE_SOURCES   lovr SOURCES)
+    get_target_property(LOVR_CLONE_INCLUDES  lovr INCLUDE_DIRECTORIES)
+    get_target_property(LOVR_CLONE_DEFINES   lovr COMPILE_DEFINITIONS)
+    get_target_property(LOVR_CLONE_LIBS      lovr LINK_LIBRARIES)
+    get_target_property(LOVR_CLONE_LINKDIRS  lovr LINK_DIRECTORIES)
+    get_target_property(LOVR_CLONE_OPTIONS   lovr COMPILE_OPTIONS)
+
+    add_executable(lovrc ${LOVR_CLONE_SOURCES})
+    set_target_properties(lovrc PROPERTIES
+      C_STANDARD 11
+      C_STANDARD_REQUIRED ON
+      LINK_FLAGS_DEBUG   "/SUBSYSTEM:console /ENTRY:WinMainCRTStartup"
+      LINK_FLAGS_RELEASE "/SUBSYSTEM:console /ENTRY:WinMainCRTStartup"
+    )
+    if(LOVR_BUILD_WITH_SYMBOLS)
+      set_target_properties(lovrc PROPERTIES C_VISIBILITY_PRESET "default")
+    else()
+      set_target_properties(lovrc PROPERTIES C_VISIBILITY_PRESET "hidden")
+    endif()
+    if(LOVR_CLONE_INCLUDES)
+      target_include_directories(lovrc PRIVATE ${LOVR_CLONE_INCLUDES})
+    endif()
+    if(LOVR_CLONE_DEFINES)
+      target_compile_definitions(lovrc PRIVATE ${LOVR_CLONE_DEFINES})
+    endif()
+    target_compile_definitions(lovrc PRIVATE LOVR_CONSOLE_BUILD)
+    if(LOVR_CLONE_LIBS)
+      target_link_libraries(lovrc ${LOVR_CLONE_LIBS})
+    endif()
+    if(LOVR_CLONE_LINKDIRS)
+      target_link_directories(lovrc PRIVATE ${LOVR_CLONE_LINKDIRS})
+    endif()
+    if(LOVR_CLONE_OPTIONS)
+      target_compile_options(lovrc PRIVATE ${LOVR_CLONE_OPTIONS})
+    endif()
+
+    # Append the nogame bundle to lovrc.exe just like we do for lovr.exe (see the
+    # NOGAME_BUNDLE block above), so `lovrc` is a self-contained binary.
+    add_custom_command(TARGET lovrc POST_BUILD
+      WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/etc/nogame"
+      COMMAND ${CMAKE_COMMAND} -E tar c "${PROJECT_BINARY_DIR}/nogame.zip" --format=zip .
+      COMMAND ${CMAKE_COMMAND} -E cat "${PROJECT_BINARY_DIR}/nogame.zip" >> "$<TARGET_FILE:lovrc>"
+    )
+  endif()
 
   function(move_dll)
     if(TARGET ${ARGV0})
@@ -695,7 +752,6 @@ if(WIN32)
   foreach(target ${ALL_PLUGIN_TARGETS})
     move_dll(${target})
   endforeach()
-  move_resource("lovrc.bat")
 elseif(APPLE)
   find_library(AVFOUNDATION AVFoundation)
   target_link_libraries(lovr objc ${AVFOUNDATION})

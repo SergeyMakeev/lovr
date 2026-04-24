@@ -1,4 +1,5 @@
 #include "util.h"
+#include "core/log.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -118,20 +119,17 @@ int lovrSetError(const char* format, ...) {
   return false;
 }
 
-// Logging
-
-static fn_log* lovrLogCallback;
-static void* lovrLogUserdata;
+// Logging — thin facade over src/core/log.{h,c}. The fn_log signature is preserved for backward
+// compatibility so existing call sites and Lua bindings (luax_vlog) don't change.
 
 void lovrSetLogCallback(fn_log* callback, void* userdata) {
-  lovrLogCallback = callback;
-  lovrLogUserdata = userdata;
+  log_set_lua_callback((fn_log_bridge*) callback, userdata);
 }
 
 void lovrLog(int level, const char* tag, const char* format, ...) {
   va_list args;
   va_start(args, format);
-  lovrLogCallback(lovrLogUserdata, level, tag, format, args);
+  log_vprintf((log_level) level, tag, format, args);
   va_end(args);
 }
 

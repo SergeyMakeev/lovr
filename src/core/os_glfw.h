@@ -103,7 +103,7 @@ uintptr_t os_get_xcb_window(void) {
 
 #else
 
-#include <stdio.h>
+#include "util.h"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -141,7 +141,7 @@ static struct {
 } glfwState;
 
 static void onError(int code, const char* description) {
-  printf("GLFW error %d: %s\n", code, description);
+  lovrLog(LOG_ERROR, "GLFW", "%s (code %d)", description, code);
 }
 
 static void onWindowClose(GLFWwindow* window) {

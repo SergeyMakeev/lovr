@@ -155,10 +155,13 @@ static int32_t onInputEvent(struct android_app* app, AInputEvent* event) {
 
 int main(int argc, char** argv);
 
+// Internal: pipes stdout/stderr to logcat. Forward declaration; impl is below.
+static void android_attach_log_pipe(void);
+
 void android_main(struct android_app* app) {
   state.app = app;
   (*app->activity->vm)->AttachCurrentThread(app->activity->vm, &state.jni, NULL);
-  os_open_console();
+  android_attach_log_pipe();
   app->onAppCmd = onAppCmd;
   app->onInputEvent = onInputEvent;
   main(0, NULL);
@@ -221,7 +224,7 @@ static void* log_main(void* data) {
   return 0;
 }
 
-void os_open_console(void) {
+static void android_attach_log_pipe(void) {
   if (!log.attached) {
     pthread_create(&log.thread, NULL, log_main, log.handles);
     pthread_detach(log.thread);

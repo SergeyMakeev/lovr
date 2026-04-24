@@ -241,10 +241,6 @@ uint32_t os_get_core_count(void) {
   return 1;
 }
 
-void os_open_console(void) {
-  //
-}
-
 double os_get_time(void) {
   return emscripten_get_now() / 1000.;
 }

@@ -362,7 +362,12 @@ void luax_vlog(void* context, int level, const char* tag, const char* format, va
     lua_pushvfstring(L, format, args);
     lua_pushstring(L, levels[level]);
     lua_pushstring(L, tag);
-    lua_call(L, 3, 0);
+    // pcall: if user's lovr.log throws, swallow the error here so the C log dispatch path
+    // (and the dispatch_depth re-entrancy guard in src/core/log.c) doesn't unwind in an
+    // inconsistent state.
+    if (lua_pcall(L, 3, 0, 0) != 0) {
+      lua_pop(L, 1);
+    }
   } else {
     lua_pop(L, 1);
   }

@@ -116,42 +116,6 @@ uint32_t os_get_core_count(void) {
   return info.dwNumberOfProcessors;
 }
 
-// Returns true if the CRT stream's underlying file descriptor already points at a real file or
-// pipe (e.g. `--log-file` redirected it in main.c, or the user ran `lovr ... > log.txt` / `| more`).
-// In those cases we must NOT freopen the stream onto `CONOUT$` — doing so would break the user's
-// redirect / hijack the log capture.
-static bool streamIsRedirected(FILE* stream) {
-  int fd = _fileno(stream);
-  if (fd < 0) return false;
-  HANDLE h = (HANDLE) (intptr_t) _get_osfhandle(fd);
-  if (h == INVALID_HANDLE_VALUE) return false;
-  DWORD type = GetFileType(h);
-  return type == FILE_TYPE_DISK || type == FILE_TYPE_PIPE;
-}
-
-void os_open_console(void) {
-  if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
-    if (GetLastError() != ERROR_ACCESS_DENIED) {
-      if (!AllocConsole()) {
-        return;
-      }
-    }
-  }
-
-  // Only reattach a stream to the console if it isn't already going somewhere the user asked for
-  // (a log file from `--log-file`, or a shell redirect / pipe). This keeps `--console` and
-  // `--log-file` independent: each flag does what it says without clobbering the other.
-  if (!streamIsRedirected(stdout)) {
-    freopen("CONOUT$", "w", stdout);
-  }
-  if (!streamIsRedirected(stderr)) {
-    freopen("CONOUT$", "w", stderr);
-  }
-  if (!streamIsRedirected(stdin)) {
-    freopen("CONIN$", "r", stdin);
-  }
-}
-
 double os_get_time(void) {
   LARGE_INTEGER t;
   QueryPerformanceCounter(&t);

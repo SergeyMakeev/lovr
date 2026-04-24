@@ -18,7 +18,6 @@ bool lovrSystemInit(void);
 void lovrSystemDestroy(void);
 const char* lovrSystemGetOS(void);
 uint32_t lovrSystemGetCoreCount(void);
-void lovrSystemOpenConsole(void);
 void lovrSystemRequestPermission(Permission permission);
 bool lovrSystemOpenWindow(struct os_window_config* config);
 bool lovrSystemIsWindowOpen(void);

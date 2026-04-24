@@ -684,10 +684,8 @@ bool lovrGraphicsInit(GraphicsConfig* config) {
 
   if (!gpu_init(&gpu)) {
     const char* gpu_err = gpu_get_error();
-    fprintf(stderr,
-      "LOVR_GPU_INIT: lovrGraphicsInit failed. detail=%s\n"
-      "LOVR_GPU_INIT: hints=GPU-less runners: LOVR_GPULESS=1 (prefer Lavapipe/CPU device), VK_ICD_FILENAMES, LOVR_GPU_VERBOSE=1 (list devices). Grep stderr for LOVR_GPU_INIT.\n",
-      gpu_err);
+    lovrLog(LOG_ERROR, "GPU", "LOVR_GPU_INIT: lovrGraphicsInit failed. detail=%s", gpu_err);
+    lovrLog(LOG_ERROR, "GPU", "LOVR_GPU_INIT: hints=GPU-less runners: LOVR_GPULESS=1 (prefer Lavapipe/CPU device), VK_ICD_FILENAMES, LOVR_GPU_VERBOSE=1 (list devices). Grep log for LOVR_GPU_INIT.");
 #if _WIN32
     bool showDialog = true;
     const char* gpuless = getenv("LOVR_GPULESS");
